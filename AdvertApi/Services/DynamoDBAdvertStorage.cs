@@ -1,10 +1,10 @@
-﻿using AdvertApi.Models;
+﻿using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using AdvertApi.Models;
 using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.DataModel;
 using AutoMapper;
-using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
 
 namespace AdvertApi.Services
 {
@@ -21,22 +21,26 @@ namespace AdvertApi.Services
         {
             var dbModel = _mapper.Map<AdvertDbModel>(model);
 
-            dbModel.Id = new Guid().ToString();
+            dbModel.Id = Guid.NewGuid().ToString();
             dbModel.CreationDateTime = DateTime.UtcNow;
             dbModel.Status = AdvertStatus.Pending;
 
             using (var client = new AmazonDynamoDBClient())
             {
+                var table = await client.DescribeTableAsync("Adverts");
+
                 using (var context = new DynamoDBContext(client))
                 {
                     await context.SaveAsync(dbModel);
                 }
             }
+
             return dbModel.Id;
         }
 
         public async Task<bool> CheckHealthAsync()
         {
+            Console.WriteLine("Health checking...");
             using (var client = new AmazonDynamoDBClient())
             {
                 var tableData = await client.DescribeTableAsync("Adverts");
@@ -50,13 +54,11 @@ namespace AdvertApi.Services
             {
                 using (var context = new DynamoDBContext(client))
                 {
-                    var record = await context.LoadAsync<AdvertModel>(model.Id);
-                    if (record == null)
-                    {
-                        throw new KeyNotFoundException($"A record with ID={model.Id} was not found");
-                    }
+                    var record = await context.LoadAsync<AdvertDbModel>(model.Id);
+                    if (record == null) throw new KeyNotFoundException($"A record with ID={model.Id} was not found.");
                     if (model.Status == AdvertStatus.Active)
                     {
+                        record.FilePath = model.FilePath;
                         record.Status = AdvertStatus.Active;
                         await context.SaveAsync(record);
                     }
@@ -66,6 +68,23 @@ namespace AdvertApi.Services
                     }
                 }
             }
+        }
+
+        public async Task<AdvertModel> GetById(string id)
+        {
+            using (var client = new AmazonDynamoDBClient())
+            {
+                using (var context = new DynamoDBContext(client))
+                {
+                    var dbModel = await context.LoadAsync<AdvertDbModel>(id);
+                    if (dbModel != null)
+                    {
+                        return _mapper.Map<AdvertModel>(dbModel);
+                    }
+                }
+            }
+
+            throw new KeyNotFoundException();
         }
     }
 }
